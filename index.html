@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Boligprisstatistikker</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.2/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</head>
+<body class="bg-light">
+    <div class="container my-5">
+        <h2 class="text-center mt-2">Boligprisstatistikker for <span id="city-name"></span></h2>
+        
+        <div class="text-center mt-4">
+            <label for="city-dropdown" class="d-block text-secondary mb-2">Velg by:</label>
+            <select id="city-dropdown" class="form-control d-inline-block w-auto">
+                <!-- Options will be populated by JavaScript -->
+            </select>
+        </div>
+        
+        <div class="text-center mt-4 d-flex justify-content-around">
+            <div>
+                <span class="d-block text-secondary">Gjennomsnittspris:</span>
+                <div class="display-4 font-weight-bold mt-2" id="average-price"></div>
+            </div>
+            <div>
+                <span class="d-block text-secondary"><span id="selected-button-name"></span></span>
+                <div class="display-4 font-weight-bold mt-2" id="selected-change"></div>
+            </div>
+            <div>
+                <span class="d-block text-secondary">Kvadratmeterpris:</span>
+                <div class="display-4 font-weight-bold mt-2" id="sqm-price"></div>
+            </div>
+        </div>
+        
+        <div class="text-center mt-4" id="buttons-container">
+            <!-- gets filled up with the buttons -->
+        </div>
+        <!-- Chart.js canvas -->
+        <canvas id="price-chart" class="mt-4"></canvas>
+    </div>
+    
+    <script>
+        // Fetch data
+        const corsProxy = 'https://api.allorigins.win/get?url=';
+        const apiUrl = 'https://ommu1982.pythonanywhere.com/static/boligprisstatistikk.json';
+
+        fetch(corsProxy + encodeURIComponent(apiUrl))
+            .then(response => response.json())
+            .then(data => {
+                try {
+                    const jsonData = JSON.parse(data.contents);
+                    if (!jsonData || typeof jsonData !== 'object') {
+                        throw new Error("Invalid JSON structure");
+                    }
+                    processData(jsonData);
+                    populateCityDropdown(jsonData);
+                    populateButtons(jsonData);
+                    setupInitialData(jsonData, "Norge");
+                    setupEventListeners(jsonData);
+                } catch (e) {
+                    console.error('Error parsing JSON data:', e);
+                }
+            })
+            .catch(error => console.error('Error fetching data:', error));
+            // Process data
+        function processData(data) {
+            Object.keys(data).forEach(city => {
+                Object.keys(data[city]).forEach(key => {
+                    if (typeof data[city][key] === 'string' && data[city][key].includes('%')) {
+                        data[city][key] = parseFloat(data[city][key].replace('%', '').replace(',', '.'));
+                    }
+                });
+            });
+        }
+        // Populate city dropdown
+        function populateCityDropdown(data) {
+            const dropdown = document.getElementById('city-dropdown');
+            Object.keys(data).forEach(cityName => {
+                const option = document.createElement('option');
+                option.value = cityName;
+                option.textContent = cleanCityName(cityName);
+                dropdown.appendChild(option);
+            });
+            dropdown.value = "Oslo"; 
+        }
+        // Populate buttons
+        function populateButtons(data) {
+            const buttonsContainer = document.getElementById('buttons-container');
+            const sampleCityData = data["Norge"]; 
+            Object.keys(sampleCityData).forEach(key => {
+                if (key.startsWith("Endring")) {
+                    const button = document.createElement('button');
+                    button.className = 'btn btn-outline-secondary mx-1';
+                    button.textContent = key;
+                    button.setAttribute('data-key', key);
+                    buttonsContainer.appendChild(button);
+                }
+            });
+        }
+        // Initial data setup
+        function setupInitialData(data, initialCityName = "Norge") {
+            updateCityData(data, initialCityName);
+            setupChart();
+            updateChartWithKey(data, initialCityName, "Endring siste måned");
+            displayChangeValue(data[initialCityName]["Endring siste måned"], "Endring siste måned");
+        }
+        // Event listeners
+        function setupEventListeners(data) {
+            document.getElementById('city-dropdown').addEventListener('change', function() {
+                const selectedCityName = this.value;
+                updateCityData(data, selectedCityName);
+                updateChartWithKey(data, selectedCityName, "Endring siste måned");
+                displayChangeValue(data[selectedCityName]["Endring siste måned"], "Endring siste måned");
+            });
+            // Event listener for the buttons
+            document.getElementById('buttons-container').addEventListener('click', function(event) {
+                if (event.target.tagName === 'BUTTON') {
+                    const dataKey = event.target.getAttribute('data-key');
+                    const selectedCityName = document.getElementById('city-dropdown').value;
+                    updateChartWithKey(data, selectedCityName, dataKey);
+                    displayChangeValue(data[selectedCityName][dataKey], dataKey);
+                }
+            });
+        }
+            // Chart.js setup
+        function setupChart() {
+            const ctx = document.getElementById('price-chart').getContext('2d');
+            window.myLineChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: '',
+                        data: [],
+                        borderColor: 'rgb(75, 192, 192)',
+                        pointBackgroundColor: 'rgb(75, 192, 192)',
+                        pointRadius: 8,
+                        pointHoverRadius: 30,
+                        tension: 0.4,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: {
+                            type: 'category'
+                        },
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+        // Update chart with selected data key
+        function updateChartWithKey(data, selectedCityName, dataKey) {
+            const cityData = data[selectedCityName];
+            const currentPrice = parseFloat(cityData["Gjennomsnittspris"].replace(/\s/g, '').replace('kr', '').replace(',', '.'));
+            const { labels, values } = getChartLabelsAndValues(dataKey, currentPrice, cityData[dataKey]);
+
+            window.myLineChart.data.labels = labels;
+            window.myLineChart.data.datasets[0].data = values;
+            window.myLineChart.data.datasets[0].label = dataKey;
+            window.myLineChart.update();
+        }
+        // Get chart labels and values
+        function getChartLabelsAndValues(dataKey, currentPrice, percentageChange) {
+            const labels = {
+                "Endring siste måned": ["1 måned før", "Nå"],
+                "Endring sesongjustert siste måned": ["1 måned sesongjustert før", "Nå"],
+                "Endring hittil i år": ["6 måneder før", "Nå"],
+                "Endring siste år": ["1 år før", "Nå"],
+                "Endring siste 5 år": ["5 år før", "Nå"],
+                "Endring siste 10 år": ["10 år før", "Nå"]
+            };
+            const values = calculateHistoricalPrices(currentPrice, percentageChange);
+            return { labels: labels[dataKey], values };
+        }
+        // Calculate historical prices
+        function calculateHistoricalPrices(currentPrice, percentageChange) {
+            let prices = [currentPrice];
+            let previousPrice = currentPrice / (1 + percentageChange / 100); 
+            prices.unshift(previousPrice);
+            return prices;
+        }
+        // Update city data
+        function updateCityData(data, cityName) {
+            const cityData = data[cityName];
+            const cleanedCityName = cleanCityName(cityName);
+            document.getElementById('city-name').textContent = cleanedCityName;
+            document.getElementById('average-price').textContent = cityData["Gjennomsnittspris"] + 'kr';
+            document.getElementById('sqm-price').textContent = cityData["Gjennomsnitt kvm. pris"] + 'kr';
+        }
+        // Display change value
+        function displayChangeValue(value, buttonName) {
+            document.getElementById('selected-change').textContent = value + '%';
+            document.getElementById('selected-button-name').textContent = buttonName + ":";
+        }
+        // Helper function to clean city name
+        function cleanCityName(cityName) {
+            return cityName.replace(/ m\/omegn/g, '');
+        }
+    </script>
+</body>
+</html>
